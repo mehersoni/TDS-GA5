@@ -341,3 +341,111 @@ def scan(data: dict):
     return {
         "categories": categories
     }
+
+
+
+
+import json
+import re
+
+# ============================================================
+# Question 5
+# Endpoint: /run_guard
+# ============================================================
+
+def canonicalize(obj):
+    """
+    Canonicalize JSON arguments:
+    - remove client_ts
+    - sort dict keys
+    - normalize whitespace inside strings
+    """
+
+    if isinstance(obj, dict):
+        return {
+            k: canonicalize(v)
+            for k, v in sorted(obj.items())
+            if k != "client_ts"
+        }
+
+    if isinstance(obj, list):
+        return [canonicalize(v) for v in obj]
+
+    if isinstance(obj, str):
+        return re.sub(r"\s+", " ", obj).strip()
+
+    return obj
+
+
+def same_call(step1, step2):
+    return (
+        step1["tool"] == step2["tool"]
+        and canonicalize(step1["args"]) == canonicalize(step2["args"])
+    )
+
+
+@app.post("/run_guard")
+def run_guard(data: dict):
+
+    budget = data["budget_tokens"]
+    steps = data.get("steps", [])
+
+    # --------------------------------------------------
+    # Budget check
+    # --------------------------------------------------
+
+    used = sum(step.get("tokens_used", 0) for step in steps)
+
+    if used >= budget:
+        return {
+            "decision": "halt",
+            "reason": f"Cumulative tokens_used ({used}) has reached the budget ({budget})."
+        }
+
+    n = len(steps)
+
+    # --------------------------------------------------
+    # 3 identical consecutive calls
+    # --------------------------------------------------
+
+    if n >= 3:
+
+        a = steps[-1]
+        b = steps[-2]
+        c = steps[-3]
+
+        if same_call(a, b) and same_call(b, c):
+            return {
+                "decision": "halt",
+                "reason": "Three identical tool calls detected."
+            }
+
+    # --------------------------------------------------
+    # 2-step cycle
+    # A B A B A B
+    # --------------------------------------------------
+
+    if n >= 6:
+
+        tail = steps[-6:]
+
+        A = tail[0]
+        B = tail[1]
+
+        cycle = (
+            same_call(tail[0], tail[2]) and
+            same_call(tail[2], tail[4]) and
+            same_call(tail[1], tail[3]) and
+            same_call(tail[3], tail[5])
+        )
+
+        if cycle:
+            return {
+                "decision": "halt",
+                "reason": "Detected repeating two-step cycle."
+            }
+
+    return {
+        "decision": "continue",
+        "reason": "Budget available and no loop detected."
+    }
