@@ -72,9 +72,10 @@ def restricted_path(path):
 def contains_restricted(command: str):
 
     expanded = os.path.expandvars(command)
+    expanded = expanded.replace("$HOME", "/home/agent")
     expanded = expanded.replace("~", "/home/agent")
 
-    if RESTRICTED in expanded:
+    if normalize(RESTRICTED) in normalize(expanded):
         return True
 
     try:
@@ -86,36 +87,41 @@ def contains_restricted(command: str):
 
         token = token.strip("\"'")
 
-        if restricted_path(token):
-            return True
+        try:
+            if restricted_path(token):
+                return True
+        except:
+            pass
+
+        m = re.findall(r'["\']([^"\']+)["\']', token)
+        for p in m:
+            try:
+                if restricted_path(p):
+                    return True
+            except:
+                pass
 
         try:
-            decoded = base64.b64decode(token + "==").decode(
-                "utf-8",
-                errors="ignore"
-            )
+            decoded = base64.b64decode(token + "==").decode(errors="ignore")
 
             decoded = os.path.expandvars(decoded)
+            decoded = decoded.replace("$HOME", "/home/agent")
             decoded = decoded.replace("~", "/home/agent")
 
-            if RESTRICTED in decoded:
+            if normalize(RESTRICTED) in normalize(decoded):
                 return True
 
         except Exception:
             pass
 
-    relative_patterns = [
-        "../.bashrc",
-        "../../.bashrc",
-        "../../../.bashrc",
-    ]
-
-    for p in relative_patterns:
-        if p in expanded:
-            return True
+    for path in re.findall(r"/[A-Za-z0-9_./\-]+", expanded):
+        try:
+            if restricted_path(path):
+                return True
+        except:
+            pass
 
     return False
-
 
 @app.post("/proration")
 def guardrail(data: dict):
@@ -209,22 +215,26 @@ SECRET_PATTERNS = [
 ]
 
 PROMPT_PATTERNS = [
-
     "ignore previous instructions",
-    "ignore the user",
+    "ignore all previous",
+    "ignore system",
     "ignore user",
-    "ignore system prompt",
-    "ignore safety",
+    "ignore the user",
     "ignore stop",
     "ignore cancel",
     "override user",
+    "override safety",
+    "bypass safety",
     "silently upload",
     "silently send",
     "without informing",
+    "without notifying",
     "exfiltrate",
     "send local files",
+    "send file contents",
+    "upload secrets",
+    "steal",
 ]
-
 PERMISSION_PATTERNS = [
 
     "filesystem: all",
